@@ -1,0 +1,19 @@
+name: reactive-banana-extras
+version: 0.1.0
+
+ghc-options: -freverse-errors -Wall
+
+library:
+  source-dirs: src
+  dependencies:
+    - async
+    - base            >= 4.10 && < 5
+    - bytestring
+    - data-default-class
+    - dependent-map
+    - dependent-sum
+    - lens
+    - mtl
+    - reactive-banana >= 1.1  && < 1.2
+    - stm
+    - vty             >= 5.17 && < 5.18
