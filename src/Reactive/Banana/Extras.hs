@@ -1,13 +1,16 @@
 {-# language DeriveFunctor       #-}
+{-# language InstanceSigs        #-}
 {-# language LambdaCase          #-}
 {-# language RankNTypes          #-}
 {-# language RecursiveDo         #-}
 {-# language ScopedTypeVariables #-}
 
 module Reactive.Banana.Extras
-  ( -- * Event
+  ( -- * Varying
+    Varying(..)
+    -- * Event
     -- ** Core combinators
-    pushE
+  , pushE
   , delayE
   , applyE
   , intersectE
@@ -75,6 +78,7 @@ module Reactive.Banana.Extras
   , current
     -- ** Core combinators
   , applyD
+  , promptlyApplyD
     -- ** Accumulation
   , accumD
   , amassD
@@ -94,10 +98,36 @@ import Control.Monad.Fix (MonadFix)
 import Data.Bool (bool)
 import Data.Maybe (isNothing)
 import Data.Monoid ((<>))
-import Reactive.Banana
+import Reactive.Banana hiding ((<@>), (<@))
 import Reactive.Banana.Frameworks
 import System.IO (hPrint, stderr)
 import Unsafe.Coerce (unsafeCoerce)
+
+import qualified Reactive.Banana
+
+
+--------------------------------------------------------------------------------
+-- Varying
+
+class Functor f => Varying f where
+  (<@>) :: f (a -> b) -> Event a -> Event b
+  (<@) :: f b -> Event a -> Event b
+  x <@ y = const <$> x <@> y
+
+infixl 4 <@>
+infixl 4 <@
+
+instance Varying Behavior where
+  (<@>) = (Reactive.Banana.<@>)
+  (<@) = (Reactive.Banana.<@)
+
+instance Varying Dynamic where
+  (<@>) :: Dynamic (a -> b) -> Event a -> Event b
+  (<@>) = applyD
+
+instance Varying Moment where
+  (<@>) :: Moment (a -> b) -> Event a -> Event b
+  mf <@> ex = observeE ((\x -> mf <*> pure x) <$> ex)
 
 
 --------------------------------------------------------------------------------
@@ -469,25 +499,23 @@ updates (Dynamic e _) = e
 current :: Dynamic a -> Behavior a
 current (Dynamic _ b) = b
 
+applyD :: Dynamic (a -> b) -> Event a -> Event b
+applyD df ea = current df <@> ea
+
 -- | Apply a 'Dynamic' function to an 'Event'. Unlike 'apply', in the case the
 -- underlying 'Behavior' is stepping in this moment, the *new* value will be
 -- used, and thus this is not suitable for value-recursion.
-applyD :: forall a b. Dynamic (a -> b) -> Event a -> Event b
-applyD df ea =
+promptlyApplyD :: Dynamic (a -> b) -> Event a -> Event b
+promptlyApplyD df ea =
   let
-    e1 :: Event (Either (a -> b) (Either a b))
     e1 = Left <$> updates df
-
-    e2 :: Event (Either (a -> b) (Either a b))
     e2 = Right . Left <$> ea
-
-    e3 :: Event (Either (a -> b) (Either a b))
     e3 = unionWith (\(Left f) (Right (Left a)) -> Right (Right (f a))) e1 e2
-
-    e4 :: Event b
     e4 = isE (_Right . _Right) e3
   in
     unionWith const e4 (current df <@> ea)
+-- FIXME: Would be nice to use something like 'mergeWith' here, see
+-- https://github.com/HeinrichApfelmus/reactive-banana/issues/158
 
 -- | Like 'accumB', but for 'Dynamic's.
 accumD
