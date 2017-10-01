@@ -8,7 +8,7 @@ module Reactive.Banana.Vty where
 import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception (finally)
-import Control.Monad (forever)
+import Control.Monad (forever, join)
 import Data.ByteString (ByteString)
 import Reactive.Banana
 import Reactive.Banana.Frameworks
@@ -16,12 +16,12 @@ import Reactive.Banana.Frameworks
 import qualified Graphics.Vty as Vty
 
 data VtyInput = VtyInput
-  { eKey :: Event (Vty.Key, [Vty.Modifier])
-  , eMouseDown :: Event (Int, Int, Vty.Button, [Vty.Modifier])
-  , eMouseUp :: Event (Int, Int, Maybe Vty.Button)
-  , eResize :: Event (Int, Int)
-  , ePaste :: Event ByteString
-  , eLostFocus :: Event ()
+  { eKey         :: Event (Vty.Key, [Vty.Modifier])
+  , eMouseDown   :: Event (Int, Int, Vty.Button, [Vty.Modifier])
+  , eMouseUp     :: Event (Int, Int, Maybe Vty.Button)
+  , eResize      :: Event (Int, Int)
+  , ePaste       :: Event ByteString
+  , eLostFocus   :: Event ()
   , eGainedFocus :: Event ()
   }
 
@@ -80,24 +80,25 @@ vtyMoment config moment = do
         event <- Vty.nextEvent vty
         atomically (writeTQueue eventQueue event)
 
-  let loop :: IO ()
-      loop = do
-        result <-
-          atomically $
-            Left <$> takeTMVar doneVar <|>
-            Right <$> readTQueue eventQueue
+  let fire :: Vty.Event -> IO ()
+      fire = \case
+        Vty.EvKey a b           -> fireKey (a, b)
+        Vty.EvMouseDown a b c d -> fireMouseDown (a, b, c, d)
+        Vty.EvMouseUp a b c     -> fireMouseUp (a, b, c)
+        Vty.EvResize a b        -> fireResize (a, b)
+        Vty.EvPaste a           -> firePaste a
+        Vty.EvLostFocus         -> fireLostFocus ()
+        Vty.EvGainedFocus       -> fireGainedFocus ()
 
-        case result of
-          Left () -> pure ()
-          Right event -> do
-            case event of
-              Vty.EvKey a b -> fireKey (a, b)
-              Vty.EvMouseDown a b c d -> fireMouseDown (a, b, c, d)
-              Vty.EvMouseUp a b c -> fireMouseUp (a, b, c)
-              Vty.EvResize a b -> fireResize (a, b)
-              Vty.EvPaste a -> firePaste a
-              Vty.EvLostFocus -> fireLostFocus ()
-              Vty.EvGainedFocus -> fireGainedFocus ()
-            loop
+  let loop :: IO ()
+      loop = join (atomically (action1 <|> action2))
+       where
+        action1 :: STM (IO ())
+        action1 = pure () <$ takeTMVar doneVar
+
+        action2 :: STM (IO ())
+        action2 = do
+          event <- readTQueue eventQueue
+          pure (fire event >> loop)
 
   withAsync worker (\_ -> loop) `finally` Vty.shutdown vty
