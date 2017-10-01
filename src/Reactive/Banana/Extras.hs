@@ -88,7 +88,7 @@ module Reactive.Banana.Extras
   , traceD
   ) where
 
-import Control.Lens (Prism', preview)
+import Control.Lens (Prism', _Right, preview)
 import Control.Monad ((>=>), guard)
 import Control.Monad.Fix (MonadFix)
 import Data.Bool (bool)
@@ -472,12 +472,22 @@ current (Dynamic _ b) = b
 -- | Apply a 'Dynamic' function to an 'Event'. Unlike 'apply', in the case the
 -- underlying 'Behavior' is stepping in this moment, the *new* value will be
 -- used, and thus this is not suitable for value-recursion.
-applyD :: Dynamic (a -> b) -> Event a -> Event b
-applyD df ea = go <$> current df <@> theseE (updates df) ea
- where
-  go _ (This _) = error "applyD: This"
-  go f (That a) = f a
-  go _ (These f a) = f a
+applyD :: forall a b. Dynamic (a -> b) -> Event a -> Event b
+applyD df ea =
+  let
+    e1 :: Event (Either (a -> b) (Either a b))
+    e1 = Left <$> updates df
+
+    e2 :: Event (Either (a -> b) (Either a b))
+    e2 = Right . Left <$> ea
+
+    e3 :: Event (Either (a -> b) (Either a b))
+    e3 = unionWith (\(Left f) (Right (Left a)) -> Right (Right (f a))) e1 e2
+
+    e4 :: Event b
+    e4 = isE (_Right . _Right) e3
+  in
+    unionWith const e4 (current df <@> ea)
 
 -- | Like 'accumB', but for 'Dynamic's.
 accumD
