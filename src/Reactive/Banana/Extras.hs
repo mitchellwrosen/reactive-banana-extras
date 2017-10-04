@@ -491,6 +491,19 @@ data Dynamic a
   = Dynamic (Event a) (Behavior a)
   deriving Functor
 
+instance Applicative Dynamic where
+  pure x = Dynamic never (pure x)
+  liftA2 f (Dynamic e1 b1) (Dynamic e2 b2) = Dynamic e b where
+    e1b2 = flip (,) <$> b2 <@> e1
+    b1e2 = (,) <$> b1 <@> e2
+    d1d2 = unionWith (\(p, _) (_, q) -> (p, q)) e1b2 b1e2
+    e = uncurry f <$> d1d2
+    b = f <$> b1 <*> b2
+  Dynamic e1 _ *> Dynamic e2 b2 = Dynamic e b2 where
+    e = unionWith const e2 (b2 <@ e1)
+  Dynamic e1 b1 <* Dynamic e2 _ = Dynamic e b1 where
+    e = unionWith const e1 (b1 <@ e2)
+
 -- | Get the 'Event' of a 'Dynamic'.
 updates :: Dynamic a -> Event a
 updates (Dynamic e _) = e
